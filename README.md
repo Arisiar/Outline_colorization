@@ -3,6 +3,12 @@
 TensorFlow implementation of U-net | Resdiual U-net | DeeplabV3+ that compare the differences between difference structures for 
 Outline colorization works.
 
+We also use the following algorithm:
+
+- [Spectral Normalization for Generative Adversarial Networks](https://arxiv.org/abs/1802.05957)
+
+- [Squeeze-and-Excitation Networks](https://arxiv.org/abs/1709.01507)
+
 Here are some result in our test:
 
 <img src="./img/result.jpg" width="900px"/>
