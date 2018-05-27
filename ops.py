@@ -7,44 +7,6 @@ def bn(x , is_t=True, name="scope" , reuse=False):
 
 def lrelu(x, leak=0.2, name="lrelu"):
     return tf.maximum(x, leak*x)
-    
-def pixel_dcl(inputs, output_dim, k_h=3, k_w=3, name='pixel_dcl', d_format='NHWC'):
-
-    axis = (d_format.index('H'), d_format.index('W'))
-    conv0 = conv2d(inputs, output_dim,  k_h=2, k_w=2, name=name+'_conv2')
-    conv1 = conv2d(conv0 , output_dim,  k_h=2, k_w=2, name=name+'_conv1')
-    dilated_conv0 = dilate_tensor(conv0, axis, (0, 0), name+'/dialte_conv0')
-    dilated_conv1 = dilate_tensor(conv1, axis, (1, 1), name+'/dialte_conv1')
-    conv1 = tf.add(dilated_conv0, dilated_conv1, name+'/add1')
-    with tf.variable_scope(name+'/conv2'):
-        shape = list([k_h, k_w]) + [output_dim, output_dim]
-        weights = tf.get_variable(
-            'weights', shape, initializer=tf.truncated_normal_initializer())
-        weights = tf.multiply(weights, get_mask(shape, name))
-        strides = [1, 1, 1, 1]
-        conv2 = tf.nn.conv2d(conv1, weights, strides, padding='SAME',
-                             data_format=d_format)
-    outputs = tf.add(conv1, conv2, name=name+'/add2')
-
-    return outputs
-
-def get_mask(shape, scope):
-    new_shape = (np.prod(shape[:-2]), shape[-2], shape[-1])
-    mask = np.ones(new_shape, dtype=np.float32)
-    for i in range(0, new_shape[0], 2):
-        mask[i, :, :] = 0
-    mask = np.reshape(mask, shape, 'F')
-    return tf.constant(mask, dtype=tf.float32, name=scope+'/mask')
-
-def dilate_tensor(inputs, axes, shifts, scope):
-    for index, axis in enumerate(axes):
-        eles = tf.unstack(inputs, axis=axis, name=scope+'/unstack%s' % index)
-        zeros = tf.zeros_like(
-            eles[0], dtype=tf.float32, name=scope+'/zeros%s' % index)
-        for ele_index in range(len(eles), 0, -1):
-            eles.insert(ele_index-shifts[index], zeros)
-        inputs = tf.stack(eles, axis=axis, name=scope+'/stack%s' % index)
-    return inputs
    
 def conv2d(input_, output_dim,  k_h=3, k_w=3, stride=1, stddev=0.02, spectral_normed=False, update_collection=None, name="conv2d"):
     with tf.variable_scope(name):
