@@ -2,20 +2,13 @@ import argparse
 import os
 import tensorflow as tf
 from model import Colorization
-import pickle
-
-def load_pkl(path):
-    pkl_path = open(path,'rb')
-    data = pickle.load(pkl_path)
-    pkl_path.close()
-    return data
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--datasets', dest='datasets', default='outlines', help='name of the dataset')
 parser.add_argument('--in_h', dest='in_h', default=256, help='height of the input')
 parser.add_argument('--in_w', dest='in_w', default=256, help='width of the input')
 parser.add_argument('--senet', dest='senet', type=bool, default=True, help='set senet structure')
-parser.add_argument('--epoch', dest='epoch', type=int, default=200, help='# of epoch')
+parser.add_argument('--epoch', dest='epoch', type=int, default=20, help='# of epoch')
 parser.add_argument('--batch_size', dest='batch_size', type=int, default=10, help='# images in batch')                   
 parser.add_argument('--learn_rate', dest='learn_rate', type=float, default=0.0005, help='initial learning rate for adam')
 parser.add_argument('--checkpoint_dir', dest='checkpoint_dir', default='./checkpoint', help='models are saved here')
