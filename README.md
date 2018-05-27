@@ -4,7 +4,7 @@ Outline colorization works.
 
 Here are some result in our test:
 
-![image](https://github.com/Arisiar/Outline_colorization/blob/master/img/result.jpg)
+<img src="./img/result.jpg" width="900px"/>
 
 ## Setup
 
