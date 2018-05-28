@@ -45,4 +45,4 @@ python main.py --training False --network (U_net | Res_U_net | DeeplabV3_Plus)
 Sample will save in the ```./sample``` and each time you will get an number of images according to the bacth size.
 
 ### Test
-Put the images which you want to test in the ```./test``` and you will git the result in the ```./result```.
+Put the images which you want to test in the ```./test``` and you will get the result in the ```./result```.
