@@ -15,7 +15,7 @@ Here are some result in our test:
 
 ## Setup
 
-### Prerequisites
+
 - Windows
 - Tensorflow 1.6.0
 - Python 3.6.4
