@@ -2,11 +2,77 @@ from tensorflow.contrib.layers.python.layers import batch_norm
 import tensorflow as tf
 import numpy as np
 
-def bn(x , is_t=True, name="scope" , reuse=False):
+
+def phaseShift(inputs, scale, shape_1, shape_2):
+    # Tackle the condition when the batch is None
+    X = tf.reshape(inputs, shape_1)
+    X = tf.transpose(X, [0, 1, 2, 4, 3])
+    
+    
+    return tf.reshape(X, shape_2)
+
+def pixelShuffler(inputs, scale=2):
+    size = inputs.shape
+    batch_size = int(size[0])
+    h = int(size[1])
+    w = int(size[2])
+    c = inputs.get_shape().as_list()[-1]
+
+    # Get the target channel size
+    channel_target = c // (scale * scale) #512/4 = 128
+    channel_factor = c // channel_target  #512/128 = 4 
+
+    shape_1 = [batch_size, h, w, channel_factor // scale, channel_factor // scale] # 10,8,8,2,2
+    shape_2 = [batch_size, h * scale, w * scale, 1] #10,16,16,1
+    # Reshape and transpose for periodic shuffling for each channel
+    input_split = tf.split(inputs, channel_target, axis=3)#10,8,8,4
+    output = tf.concat([phaseShift(x, scale, shape_1, shape_2) for x in input_split], axis=3)
+
+    return output
+
+def bn(x , name="scope" , is_t=True, reuse=False):
     return batch_norm(x , epsilon=1e-5, decay=0.9 , is_training=is_t, scale=True, scope=name , reuse= reuse , updates_collections=None)
 
 def lrelu(x, leak=0.2, name="lrelu"):
     return tf.maximum(x, leak*x)
+    
+def pixel_dcl(inputs, output_dim, k_h=3, k_w=3, name='pixel_dcl', d_format='NHWC'):
+
+    axis = (d_format.index('H'), d_format.index('W'))
+    conv0 = conv2d(inputs, output_dim,  k_h=2, k_w=2, name=name+'_conv2')
+    conv1 = conv2d(conv0 , output_dim,  k_h=2, k_w=2, name=name+'_conv1')
+    dilated_conv0 = dilate_tensor(conv0, axis, (0, 0), name+'/dialte_conv0')
+    dilated_conv1 = dilate_tensor(conv1, axis, (1, 1), name+'/dialte_conv1')
+    conv1 = tf.add(dilated_conv0, dilated_conv1, name+'/add1')
+    with tf.variable_scope(name+'/conv2'):
+        shape = list([k_h, k_w]) + [output_dim, output_dim]
+        weights = tf.get_variable(
+            'weights', shape, initializer=tf.truncated_normal_initializer())
+        weights = tf.multiply(weights, get_mask(shape, name))
+        strides = [1, 1, 1, 1]
+        conv2 = tf.nn.conv2d(conv1, weights, strides, padding='SAME',
+                             data_format=d_format)
+    outputs = tf.add(conv1, conv2, name=name+'/add2')
+
+    return outputs
+
+def get_mask(shape, scope):
+    new_shape = (np.prod(shape[:-2]), shape[-2], shape[-1])
+    mask = np.ones(new_shape, dtype=np.float32)
+    for i in range(0, new_shape[0], 2):
+        mask[i, :, :] = 0
+    mask = np.reshape(mask, shape, 'F')
+    return tf.constant(mask, dtype=tf.float32, name=scope+'/mask')
+
+def dilate_tensor(inputs, axes, shifts, scope):
+    for index, axis in enumerate(axes):
+        eles = tf.unstack(inputs, axis=axis, name=scope+'/unstack%s' % index)
+        zeros = tf.zeros_like(
+            eles[0], dtype=tf.float32, name=scope+'/zeros%s' % index)
+        for ele_index in range(len(eles), 0, -1):
+            eles.insert(ele_index-shifts[index], zeros)
+        inputs = tf.stack(eles, axis=axis, name=scope+'/stack%s' % index)
+    return inputs
    
 def conv2d(input_, output_dim,  k_h=3, k_w=3, stride=1, stddev=0.02, spectral_normed=False, update_collection=None, name="conv2d"):
     with tf.variable_scope(name):
@@ -48,49 +114,43 @@ def deconv2d(input_, output_shape,k_h=3, k_w=3, d_h=2, d_w=2, stddev=0.02, name=
         else:
             return deconv
         
-def _l2normalize(v, eps=1e-12):
+def l2_norm(v, eps=1e-12):
   return v / (tf.reduce_sum(v ** 2) ** 0.5 + eps)
 
-def spectral_normed_weight(W, u=None, num_iters=1, update_collection=None, with_sigma=False):
-  # Usually num_iters = 1 will be enough
-  W_shape = W.shape.as_list()
-  W_reshaped = tf.reshape(W, [-1, W_shape[-1]])
-  if u is None:
-    u = tf.get_variable("u", [1, W_shape[-1]], initializer=tf.truncated_normal_initializer(), trainable=False)
-  def power_iteration(i, u_i, v_i):
-    v_ip1 = _l2normalize(tf.matmul(u_i, tf.transpose(W_reshaped)))
-    u_ip1 = _l2normalize(tf.matmul(v_ip1, W_reshaped))
-    return i + 1, u_ip1, v_ip1
-  _, u_final, v_final = tf.while_loop(
-    cond=lambda i, _1, _2: i < num_iters,
-    body=power_iteration,
-    loop_vars=(tf.constant(0, dtype=tf.int32),
-               u, tf.zeros(dtype=tf.float32, shape=[1, W_reshaped.shape.as_list()[0]]))
-  )
+def spectral_normed_weight(w, num_iters=1, update_collection=None):
+
+  w_shape = w.shape.as_list()
+  w = tf.reshape(w, [-1, w_shape[-1]])
+
+  u = tf.get_variable("u", [1, w_shape[-1]], initializer=tf.truncated_normal_initializer(), trainable=False)
+  
+  u_hat = u
+  v_hat = None
+  for i in range(num_iters):
+      v_ = tf.matmul(u_hat, tf.transpose(w))
+      v_hat = l2_norm(v_)
+
+      u_ = tf.matmul(v_hat, w)
+      u_hat = l2_norm(u_)
+       
   if update_collection is None:
-    sigma = tf.matmul(tf.matmul(v_final, W_reshaped), tf.transpose(u_final))[0, 0]
-    # sigma = tf.reduce_sum(tf.matmul(u_final, tf.transpose(W_reshaped)) * v_final)
-    W_bar = W_reshaped / sigma
-    with tf.control_dependencies([u.assign(u_final)]):
-      W_bar = tf.reshape(W_bar, W_shape)
+    sigma = tf.matmul(tf.matmul(v_hat, w), tf.transpose(u_hat))[0, 0]
+    w_bar = w / sigma
+    with tf.control_dependencies([u.assign(u_hat)]):
+      w_bar = tf.reshape(w_bar, w_shape)
   else:
-    sigma = tf.matmul(tf.matmul(v_final, W_reshaped), tf.transpose(u_final))[0, 0]
-    # sigma = tf.reduce_sum(tf.matmul(u_final, tf.transpose(W_reshaped)) * v_final)
-    W_bar = W_reshaped / sigma
-    W_bar = tf.reshape(W_bar, W_shape)
-    # Put NO_OPS to not update any collection. This is useful for the second call of discriminator if the update_op
-    # has already been collected on the first call.
+    sigma = tf.matmul(tf.matmul(v_hat, w), tf.transpose(u_hat))[0, 0]
+    w_bar = w / sigma
+    w_bar = tf.reshape(w_bar, w_shape)
     if update_collection != 'NO_OPS':
-      tf.add_to_collection(update_collection, u.assign(u_final))
-  if with_sigma:
-    return W_bar, sigma
-  else:
-    return W_bar
+      tf.add_to_collection(update_collection, u.assign(u_hat))
+
+  return w_bar
     
-def linear(input_, output_size, name=None, spectral_normed=False, update_collection=None, stddev=0.02, bias_start=0.0, with_w=False):
+def linear(input_, output_size, scope=None, spectral_normed=False, update_collection=None, stddev=0.02, bias_start=0.0, with_w=False):
     shape = input_.get_shape().as_list()
 
-    with tf.variable_scope(name or "Linear"):
+    with tf.variable_scope(scope or "Linear"):
         matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,
                                  tf.random_normal_initializer(stddev=stddev))
         bias = tf.get_variable("bias", [output_size],
@@ -124,6 +184,28 @@ def se_layer(net, out_dim, ratio, name):
         scale = net * excitation
         
         return scale
+def spectral_norm(w, iteration=1):
+   w_shape = w.shape.as_list()
+   w = tf.reshape(w, [-1, w_shape[-1]])
+
+   u = tf.get_variable("u", [1, w_shape[-1]], initializer=tf.truncated_normal_initializer(), trainable=False)
+
+   u_hat = u
+   v_hat = None
+   for i in range(iteration):
+       v_ = tf.matmul(u_hat, tf.transpose(w))
+       v_hat = l2_norm(v_)
+
+       u_ = tf.matmul(v_hat, w)
+       u_hat = l2_norm(u_)
+
+   sigma = tf.matmul(tf.matmul(v_hat, w), tf.transpose(u_hat))
+   w_norm = w / sigma
+
+   with tf.control_dependencies([u.assign(u_hat)]):
+       w_norm = tf.reshape(w_norm, w_shape)
+
+   return w_norm
     
 def concat(x, y, name):
     
