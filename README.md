@@ -1,5 +1,7 @@
 "# Outline_colorization" 
 
+  [Paper](https://drive.google.com/open?id=1c2yp5ElFB93wYUpb1FXWJ8QqH2qYorct)
+
 TensorFlow implementation of U-net | Resdiual U-net | DeeplabV3+ that compare the differences between difference structures for 
 Outline colorization works.
 
